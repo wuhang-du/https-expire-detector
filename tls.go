@@ -11,6 +11,13 @@ import (
 	log "github.com/sirupsen/logrus"
 )
 
+type detectInfo struct {
+	Result bool
+	Msg    string
+	Start  *time.Time
+	End    *time.Time
+}
+
 // TLS implements a config for TLS
 type TLS struct {
 	Host    string
@@ -25,12 +32,11 @@ func CreateTlsProbe(host string) *TLS {
 }
 
 // DoProbe return the checking result
-func (t *TLS) DoProbe() (bool, string, *time.Time, *time.Time) {
+func (t *TLS) DoProbe() *detectInfo {
 	addr := t.Host
 	conn, err := net.DialTimeout("tcp", addr, t.Timeout)
 	if err != nil {
-		log.Errorf("tcp dial error: %v", err)
-		return false, fmt.Sprintf("tcp dial error: %v", err), nil, nil
+		return &detectInfo{false, fmt.Sprintf("tcp dial error: %v", err), nil, nil}
 	}
 	if tcpConn, ok := conn.(*net.TCPConn); ok {
 		tcpConn.SetLinger(0)
@@ -52,11 +58,10 @@ func (t *TLS) DoProbe() (bool, string, *time.Time, *time.Time) {
 	defer cancel()
 	err = tconn.HandshakeContext(ctx)
 	if err != nil {
-		log.Errorf("tls handshake error: %v", err)
-		return false, fmt.Sprintf("tls handshake error: %v", err), nil, nil
+		return &detectInfo{false, fmt.Sprintf("tls handshake error: %v", err), nil, nil}
 	}
 
-	var latestEnd *time.Time
+	var LatestEnd *time.Time
 	var Start *time.Time
 	for _, cert := range tconn.ConnectionState().PeerCertificates {
 		valid := true
@@ -64,12 +69,12 @@ func (t *TLS) DoProbe() (bool, string, *time.Time, *time.Time) {
 		valid = valid && !time.Now().Before(cert.NotBefore)
 
 		if !valid {
-			log.Errorf("host %v cert expired", t.Host)
-			return false, "certificate is expired or not yet valid", nil, nil
+			//log.Errorf("host %v cert expired", t.Host)
+			return &detectInfo{false, fmt.Sprintf("certificate is expired or not yet valid"), nil, nil}
 		}
 
-		if latestEnd == nil {
-			latestEnd = &cert.NotAfter
+		if LatestEnd == nil {
+			LatestEnd = &cert.NotAfter
 			Start = &cert.NotBefore
 		}
 		log.Infof("===%v %v", cert.NotBefore, cert.NotAfter)
@@ -81,5 +86,5 @@ func (t *TLS) DoProbe() (bool, string, *time.Time, *time.Time) {
 		*/
 	}
 
-	return true, "OK", Start, latestEnd
+	return &detectInfo{true, "OK", Start, LatestEnd}
 }
